@@ -1,0 +1,175 @@
+#####################################################################
+# Application 1 -- P-hacking in economics journals
+# Paper: Detecting p-hacking
+# Authors: G. Elliott, N. Kudrin, K. Wuthrich
+#####################################################################
+#The following packages need to be installed!
+# install.packages("NlcOptim")
+# install.packages("fdrtool")
+# install.packages("pracma")
+# install.packages("gdata")
+# install.packages("spatstat")
+# install.packages("rddensity")
+# install.packages("ggplot2")
+# install.packages("gtools")
+ 
+# library(NlcOptim)
+# library(fdrtool)
+# library(pracma)
+# library(gdata)
+# library(spatstat)
+# library(rddensity)
+# library(ggplot2)
+# library(gtools)
+
+# the data used in this code was produced by Data_preparation.do
+rm(list = ls())
+
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+
+
+RNGkind(sample.kind = "default")
+source("Tests.R")
+
+#Specify interval for testing
+p_max=0.15
+p_min = 0
+
+J_all = 30 #number of bins for all data
+J_rnd=15 #number of bins for random draws
+
+#rawdata = 0/1 for derounded/raw data
+
+loop_list = list.files(pattern="input_to_elliot*")
+file_list = sub("input_to_","",loop_list)
+file_list = sub(".csv","",file_list)
+file_list = paste("figure_",file_list,sep="")
+
+for (i in 1:length(loop_list)) {
+  print(loop_list[i])
+
+
+data <- read.csv(file=loop_list[i], header=TRUE, sep=",") # change this for the fields if wanted
+attach(data)
+
+for (rawdata in c(1,1)){
+print(rawdata)
+  
+if (rawdata == 1){
+  #Raw
+  Name = c(file_list[i], "Figure3c")
+  ptop = ptop1
+  title_hist = c("", "Random draw")
+}
+if (rawdata == 0){
+  #Derounded
+  Name = c("Figure3b", "Figure3d")
+  ptop = ptop2
+  title_hist = c("(b) Full sample (de-rounded data)", "(d) Random draw (de-rounded data)")
+}
+
+#Random draw
+set.seed(123)
+idu = sort(unique(id))
+
+All_rnd = matrix(0, length(idu),1)
+for (k in 1:length(idu)){
+    All_rnd[k] =  sample(ptop[(id == idu[k])],1)
+}
+
+
+P_all = ptop	
+samples = c("P_all", "All_rnd")
+indices = c("id",  "1")
+
+
+#r = 1 for full sample, r = 2 for random draw
+for (r in c(1,1)){
+  
+  if (r==1){
+    J = J_all #number of bins for full sample
+  }
+  if (r==2){
+    J = J_rnd #number of bins for random draws
+  }
+  
+P = eval(parse(text = samples[r]))
+ind = eval(parse(text = indices[r]))
+Q = P[P<=p_max & P>=p_min]
+df <- data.frame(Q)
+
+
+bin1 = sum(Q<=(p_min+(p_max-p_min)/J))/length(Q)
+p_min_LCM = min(Q[Q>0])
+
+# Figures
+pdf(file = paste(Name[r], "pdf", sep="."))
+
+N_B = length(P[P<=0.05&P>=0.04])
+N_total = length(P[P<=p_max&P>=p_min])
+Bin_test = specify_decimal(Binomial(P, 0.04,0.05, "c"),3)
+Discontinuity = specify_decimal(Discontinuity_test(P,0.05),3)
+LCM_sup = specify_decimal(LCM(P, p_min_LCM,p_max),3)
+CS_1 = specify_decimal(CoxShi(P,ind,  p_min, p_max, J, 1, 0),3)
+CS_2B = specify_decimal(CoxShi(P,ind,  p_min, p_max, J, 2, 1),3)
+FM = specify_decimal(Fisher(P, p_min, p_max),3)
+
+space = 0.06*bin1
+p<-ggplot(df, aes(x = Q))+geom_histogram(binwidth = (p_max-p_min)/J, boundary = 0,color="black", fill="white",aes(y = stat(count / length(Q))))
+p <- p + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank())
+yloc = bin1-space
+xloc = 0.4*p_max
+sz = 8
+
+p<-p + annotate("text",x = xloc,y = yloc, size=sz,hjust = 0, label = expression(bold(paste(underline("Test: p-value")))))
+yloc = yloc - space
+p<-p + annotate("text", x = xloc,y = yloc, size=sz,hjust = 0, label = paste0(('Binomial: '), Bin_test))
+yloc = yloc - space
+p<-p + annotate("text",x = xloc,y = yloc, size=sz,hjust = 0, label = paste0(("Fisher's Test: "), FM))
+yloc = yloc - space
+p<-p + annotate("text",x = xloc,y = yloc, size=sz,hjust = 0, label = paste0(('Discontinuity: '), Discontinuity))
+yloc = yloc - space
+p<-p + annotate("text",x = xloc,y = yloc, size=sz,hjust = 0, label = paste0(('CS1: '), CS_1))
+yloc = yloc - space
+p<-p + annotate("text",x = xloc,y = yloc, size=sz,hjust = 0, label = paste0("CS2B: ", CS_2B))
+yloc = yloc - space
+p<-p + annotate("text",x = xloc,y = yloc, size=sz,hjust = 0, label = paste0("LCM: ", LCM_sup))
+
+yloc = yloc - 0.1*bin1
+p<-p + annotate("text",x = xloc,y = yloc, size=sz,hjust = 0, label = paste0("Obs in [0.04, 0.05]: ", N_B))
+yloc = yloc - space
+p<-p + annotate("text",x = xloc,y = yloc, size=sz,hjust = 0, label = paste0("Total obs: ", N_total))
+p <- p+labs(x = "p-value", y = "Proportion", size = 22)+ggtitle(title_hist[r])+theme(plot.title = element_text(face="bold",hjust = 0.5, size=24)) 
+  
+p <-p + theme(text = element_text(size=24),axis.text.x = element_text(angle=0, hjust=0.5, margin = margin(r = 0)), axis.text.y = element_text(margin = margin(r = 0)))
+print(p)
+#ggsave(p, file=paste(Name[r], "eps", sep="."), device="eps")
+dev.off()
+
+
+
+}
+}
+
+# nik adding a line to add to a csv table
+N_0 = specify_decimal(length(P[P>=0.000&P<=0.005])/N_total,3)
+N_1 = specify_decimal(length(P[P>=0.040&P<=0.045])/N_total,3)
+N_2 = specify_decimal(length(P[P> 0.045&P<=0.050])/N_total,3)
+N_3 = specify_decimal(length(P[P> 0.050&P<=0.055])/N_total,3)
+
+sub_sam = sub("input_to_elliot_", "", loop_list[i]) 
+sub_sam = sub(".csv", "", sub_sam)
+
+#output_as_text = cbind(sub_sam,Bin_test,FM,Discontinuity,CS_1,CS_2B,LCM_sup,N_B,N_total,N_0,N_1,N_2,N_3)
+output_as_text = cbind(sub_sam,Bin_test,Discontinuity,CS_1,CS_2B,LCM_sup,N_B,N_total)
+
+if (file.exists("table_elliot.csv")) {
+  write.table(output_as_text, file = "table_elliot.csv", append = TRUE, quote = TRUE, sep = ",", row.names = FALSE, col.names = FALSE)
+}
+else {
+  write.table(output_as_text, file = "table_elliot.csv", append = TRUE, quote = TRUE, sep = ",", row.names = FALSE, col.names = TRUE)
+}
+
+
+}
